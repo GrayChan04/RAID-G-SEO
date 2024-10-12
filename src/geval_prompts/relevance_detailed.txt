@@ -1,0 +1,20 @@
+You possess keen content evaluation skills and specialize in SEO research. Please score all the citations in the input content based on the standard definition and evaluation steps. The scoring range is from 0 to 10, where 10 indicates it fully meets the standard outlined in the steps, and 0 indicates it does not meet the standard at all.
+
+### Standard definition
+**Citation relevance:** Citation relevance refers to how well the cited sources directly address or support the user query, ensuring that the information is both accurate and applicable to the context of the search intent.
+
+### Evaluation steps
+
+**Step 1:** Identify the main query or topic and analyze the specific information the user is seeking.
+**Step 2:** Review the cited material to ensure it directly supports or provides evidence for the user’s query.
+**Step 3:** Evaluate whether the cited sources are from authoritative and trustworthy references, enhancing the credibility of the response.
+**Step 4:** Verify that the citations are up-to-date and reflect the latest knowledge or data on the query.
+
+### Input format
+query: {query}
+answer: {answer}
+
+### Output format
+score
+
+Note: Ensure to output only in JSON format. No additional explanations are needed. Please score the 5 citations in the input content based on the standard definition and evaluation steps.

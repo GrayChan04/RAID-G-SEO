@@ -1,0 +1,19 @@
+You possess keen content evaluation skills and specialize in SEO research. Please score all the citations in the input content based on the standard definition and evaluation steps. The scoring range is from 0 to 10, where 10 indicates it fully meets the standard outlined in the steps, and 0 indicates it does not meet the standard at all.
+
+### Standard definition
+**Subjective Count:** This metric assesses how much of the content relies on cited materials versus original analysis or interpretation. It evaluates whether a significant portion of the content is built upon references from external sources, impacting the originality and depth of the material. A balanced subjective count indicates a thoughtful mix of external references and unique insights.
+
+### Evaluation steps
+**Step 1:** Review the total word count of the content and identify sections directly supported by cited materials.
+**Step 2:** Calculate the percentage of the content that is based on external sources by comparing the cited sections to the overall word count.
+**Step 3:** Analyze the depth of original analysis in non-cited sections to assess whether the content provides unique value beyond what is referenced.
+**Step 4:** Determine if the balance between cited material and original insight supports a comprehensive and credible response, adjusting where necessary to maintain originality and authority.
+
+### Input format
+query: {query}
+answer: {answer}
+
+### Output format
+score
+
+Note: Ensure to output only the score, with no additional explanations. Please score citation [1] in the input content based on the standard definition and evaluation steps.

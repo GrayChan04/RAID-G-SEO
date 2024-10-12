@@ -1,0 +1,19 @@
+You possess keen content evaluation skills and specialize in SEO research. Please score all the citations in the input content based on the standard definition and evaluation steps. The scoring range is from 0 to 10, where 10 indicates it fully meets the standard outlined in the steps, and 0 indicates it does not meet the standard at all.
+
+### Standard definition
+**Citation Influence:** The impact that the cited material has on supporting, enhancing, or validating the content's arguments or claims.
+
+### Evaluation steps
+**Step 1:** Identify the sources cited in the content and evaluate their credibility and authority within the topic.
+**Step 2:** Assess the relevance of the cited material in relation to the main argument or claims presented.
+**Step 3:** Determine how effectively the citations are integrated to support or validate key points in the content.
+**Step 4:** Analyze whether the influence of the citations enhances the content’s overall reliability and depth.
+
+### Input format
+query: {query}
+answer: {answer}
+
+### Output format
+score
+
+Note: Ensure to output only the score, with no additional explanations. Please score citation [1] in the input content based on the standard definition and evaluation steps.
