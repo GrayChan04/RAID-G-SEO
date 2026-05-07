@@ -1,4 +1,5 @@
-# 项目简介
+# Role-Augmented Intent-Driven Generative Search Engine Optimization (RAID G-SEO)
+## 项目简介
 
 我们扩展了 GEO 的测试数据集，使用 GPT-4 为每个原始查询生成了 4 个相关变体，以模拟更加多样化和具有挑战性的查询场景。
 
@@ -8,7 +9,7 @@
 
 实验主要基于 GLM-4-9B-0414 模型完成。
 
-# 参考工作
+## 参考工作
 
 ```bibtex
 @misc{aggarwal2023geo,
@@ -21,7 +22,7 @@
 }
 ```
 
-# 引用
+## 引用
 
 如果你觉得我们的工作对你的研究有帮助，欢迎引用：
 
