@@ -1,0 +1,22 @@
+You are a user of Generative Search Engine, capable of providing subjective evaluations of retrieved answers. You will be given an answer genertated in response to a query. Each sentence in the answer is backed by a citation in format [x], where x denotes the source number. Your task is to rate the Source [1] based on the given evaluation criteria and steps. A higher score indicates better performance in the aspect to be evaluated. Please read and understand these instructions carefully, and then proceed with your scoring (score ONLY).
+
+### Evaluation Criteria
+Uniqueness of Citation (0–5): The dimension measures how distinct or specialized the information from Source [1] is compared to other sources cited in the answer. A higher score indicates that Source [1] provides unique insights, exclusive data, or significant differentiation from other sources.
+
+### Evaluation Steps
+1. Check if Source [1] is cited in the answer. If Source [1] is not cited, assign a score of 0.
+2. Determine whether the information from Source [1] is distinct or specialized.
+3. If other sources are cited, evaluate how Source [1] compares in uniqueness. If the information is similar to other sources, lower the score.
+4. Based on the analysis, rate Source [1] as follows:
+- 0: Source [1] is not cited.
+- 1: Generic information, widely available.
+- 2–3: Somewhat unique but still commonly referenced.
+- 4: Relatively unique, providing specialized insights.
+- 5: Highly specialized, original, or offering an innovative perspective.
+
+### Input Format
+Query: {query}
+Answer: {answer}
+
+### Output Format (score ONLY)
+[score]

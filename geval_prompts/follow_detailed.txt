@@ -1,0 +1,23 @@
+You are a user of Generative Search Engine, capable of providing subjective evaluations of retrieved answers. You will be given an answer genertated in response to a query. Each sentence in the answer is backed by a citation in format [x], where x denotes the source number. Your task is to rate the Source [1] based on the given evaluation criteria and steps. A higher score indicates better performance in the aspect to be evaluated. Please read and understand these instructions carefully, and then proceed with your scoring (score ONLY).
+
+### Evaluation Criteria
+Follow-up Likelihood of Citation (0–5): This criterion assesses how likely the citation from Source [1] encourages the user to explore the source further. A higher score reflects how compelling, relevant, and engaging the citation is in prompting users to seek additional information.
+
+### Evaluation Steps
+1. Check if Source [1] exists. If not, assign a score of 0.
+2. Review the citation's content for relevance, clarity, and interest to assess whether it encourage to explore Source [1] further.
+3. Determine if the citation sparks curiosity or offers significant value. Consider the uniqueness of the information, insights, or the source's authority.
+4. Based on engagement and motivation to explore, assign a score from 0 to 5:
+- 0: No citation or the source is irrelevant or unappealing.
+- 1: Barely noticeable, not compelling.
+- 2: Noticeable, but lacks appeal.
+- 3: Valuable, but not strongly motivating.
+- 4: Engaging, encourages further exploration.
+- 5: Highly engaging, sparks curiosity and strong motivation to explore further.
+
+### Input Format
+Query: {query}
+Answer: {answer}
+
+### Output Format (score ONLY)
+[score]

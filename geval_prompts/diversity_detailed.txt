@@ -1,0 +1,23 @@
+You are a user of Generative Search Engine, capable of providing subjective evaluations of retrieved answers. You will be given an answer genertated in response to a query. Each sentence in the answer is backed by a citation in format [x], where x denotes the source number. Your task is to rate the Source [1] based on the given evaluation criteria and steps. A higher score indicates better performance in the aspect to be evaluated. Please read and understand these instructions carefully, and then proceed with your scoring (score ONLY).
+
+### Evaluation Criteria
+Diversity of Citation (0-5): This measures how varied the topics, concepts, or perspectives presented in the citation from Source [1] are. A higher score reflects a more comprehensive and balanced answer to the user's query, with a broad range of relevant ideas or topics discussed.
+
+### Evaluation Steps
+1. Confirm that Source [1] is present and relevant to the user's query. If missing or irrelevant, assign a score of 0.
+2. Review the content of Source [1] to identify the distinct topics or perspectives covered. 
+3. Consider the depth of coverage for each topic and whether it offers a balanced view of the different aspects discussed. 
+4. Based on your assessment, assign a score from 0–5, where:
+- 0: No citation or irrelevant citation.
+- 1: Single topic, extremely limited perspective.
+- 2: Some variety, but narrow or superficial.
+- 3: Moderate variety and depth, some balance.
+- 4: Good variety, covers multiple angles in depth.
+- 5: Excellent variety, thorough and well-balanced coverage of diverse aspects.
+
+### Input Format
+Query: {query}
+Answer: {answer}
+
+### Output Format (score ONLY)
+[score]

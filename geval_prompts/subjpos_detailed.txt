@@ -1,0 +1,23 @@
+You are a user of Generative Search Engine, capable of providing subjective evaluations of retrieved answers. You will be given an answer genertated in response to a query. Each sentence in the answer is backed by a citation in format [x], where x denotes the source number. Your task is to rate the Source [1] based on the given evaluation criteria and steps. A higher score indicates better performance in the aspect to be evaluated. Please read and understand these instructions carefully, and then proceed with your scoring (score ONLY).
+
+### Evaluation Criteria
+Subjective Position of Citation (0–5): The dimension measures how prominently Source [1] appears within the answer and how likely the user is to encounter it when reading. A higher score indicates that the citation is highly visible and integral to the user's understanding
+
+### Evaluation Steps
+1. Confirm whether Source [1] is mentioned. If not, assign a score of 0 and stop.
+2. Evaluate where and how often Source [1] appears. Consider whether it is featured in key parts of the answer or just mentioned briefly.
+3. Assess Source [1]'s importance. Determine if it provides significant information or insight to the answer.
+4. Assign a score from 0 to 5 based on relevance, frequency, and placement:
+- 0: Source [1] is absent or irrelevant.
+- 1: Source [1] is barely mentioned or not linked to key points.
+- 2: Source [1] is mentioned but adds limited value.
+- 3: Source [1] supports the content but lacks prominence.
+- 4: Source [1] significantly supports key points and is easily identified.
+- 5: Source [1] is crucial, prominently featured, and influences key arguments.
+
+### Input Format
+Query: {query}
+Answer: {answer}
+
+### Output Format (score ONLY)
+[score]
