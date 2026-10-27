@@ -3,12 +3,12 @@ import json
 import os
 import pickle
 import uuid
-
 from pdb import set_trace as bp
+
+
 from model_load import model_get
 
-# model set
-model_name = "/home/xchen/models/GLM-4-9B-0414" # Meta-Llama-3-8B-Instruct, GLM-4-9B-0414
+model_name = "../models/GLM-4-9B-0414" # Meta-Llama-3-8B-Instruct, GLM-4-9B-0414
 
 model_, tokenizer, terminators = model_get(model_name = model_name)
 
@@ -25,7 +25,6 @@ def call_gpt(user_prompt, system_prompt = COMMON_SYSTEM_PROMPT, model = 'gpt-3.5
     # model_name = "glm-4-flash"
     model_name = "GLM-4-9B-0414" # Meta-Llama-3-8B-Instruct, GLM-4-9B-0414
     model = model_
-    # cache_file = CACHE_FILE.replace('.json',f'_{model_name}.json')
     cache_file = CACHE_FILE.replace('.json',f'_{model_name}.json')
     if os.environ.get('STATIC_CACHE', None) == 'True':
         if global_cache is None:
@@ -48,16 +47,6 @@ def call_gpt(user_prompt, system_prompt = COMMON_SYSTEM_PROMPT, model = 'gpt-3.5
 
     for attempt in range(10):
         try:
-            # responses = openai.ChatCompletion.create( # desert
-            # responses = client.chat.completions.create(
-            #     # model = model,
-            #     model = "glm-4-flash", 
-            #     temperature=temperature,
-            #     max_tokens=3192,
-            #     messages = messages,
-            #     top_p=1,
-            #     n=num_completions,
-            # )
             input_ids = tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt = True,
@@ -96,9 +85,6 @@ def call_gpt(user_prompt, system_prompt = COMMON_SYSTEM_PROMPT, model = 'gpt-3.5
             import time
             time.sleep(15)
             continue
-    # pickle.dump(responses.usage, open(f"response_usages_gpt16k/{uuid.uuid4()}.pkl", "wb"))
-    # pickle.dump(responses.usage, open(f"response_usages_zhipu/{uuid.uuid4()}.pkl", "wb"))
-    # pickle.dump(responses, open(f"response_usages_Llama-3-8B-Instruct/{uuid.uuid4()}.pkl", "wb"))
     pickle.dump(responses, open(f"response_usages_GLM-4-9B-0414/{uuid.uuid4()}.pkl", "wb"))
 
     if global_cache is None:   
@@ -297,9 +283,418 @@ Updated Output:
 """.format(summary = summary).strip()
     return call_gpt(user_prompt)
 
+# Supplementary baselines (append-only port; existing methods are unchanged).
+# IF-GEO: https://github.com/yangjizc/IF-GEO
+# Upstream commit: 559a9ab4d0e3c8b3d0c2c1e1425ce93ac2c53116 (Apache-2.0).
+# License: https://www.apache.org/licenses/LICENSE-2.0
+# Changes: inline the pipeline, use the existing local GLM generation settings
+# and a raw-output cache; omit upstream API clients, cache files and demo code.
+# Prompts, stage ordering, five-query default, JSON parsing/fallback behavior,
+# and the layout stage's 20,000-character limit follow the upstream code.
+# In particular, upstream fusion prompts retain their literal doubled braces;
+# query probability is generated but is NOT used as a numerical fusion weight.
 
 
-def intent_optimization_1_2reflection_234_3(summary):
+def _supplementary_geo_call(user_prompt, system_prompt=""):
+    """Use the current GLM/settings but preserve complete JSON/Markdown output.
+
+    Existing call_gpt/get_summary selects a code block, which can corrupt
+    structured IF-GEO outputs or discard surrounding Markdown. This separate
+    helper leaves call_gpt untouched. Raw results have a distinct cache key.
+    """
+    global global_cache
+    # cache_file = CACHE_FILE.replace('.json', '_GLM-4-9B-0414.json')
+    cache_file = CACHE_FILE.replace('.json', '_GLM-4-9B-0414_3newmethods_20260923.json')
+    static_cache = os.environ.get('STATIC_CACHE', None) == 'True'
+
+    def read_cache():
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as handle:
+                return json.load(handle)
+        return {}
+
+    if static_cache:
+        if global_cache is None:
+            global_cache = read_cache()
+        cache = global_cache
+    else:
+        cache = read_cache()
+    cache_key = str(('supplementary_geo_raw_v1', model_name,
+                     user_prompt, system_prompt, 3192, False))
+    if cache_key in cache:
+        return cache[cache_key][-1]
+
+    messages = []
+    if system_prompt:
+        messages.append({'role': 'system', 'content': system_prompt})
+    messages.append({'role': 'user', 'content': user_prompt})
+    input_ids = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors='pt'
+    ).to(model_.device)
+    responses = model_.generate(
+        input_ids,
+        max_new_tokens=3192,
+        eos_token_id=terminators,
+        do_sample=False,
+        temperature=1.0,
+        top_p=1,
+        num_return_sequences=1,
+    )
+    result = tokenizer.decode(
+        responses[0][input_ids.shape[-1]:], skip_special_tokens=True
+    )
+    # Match the existing response archive, without get_summary postprocessing.
+    pickle.dump(responses, open(
+        f'response_usages_GLM-4-9B-0414/{uuid.uuid4()}.pkl', 'wb'
+    ))
+    if not static_cache:
+        cache = read_cache()
+    cache.setdefault(cache_key, []).append(result)
+    with open(cache_file, 'w') as handle:
+        json.dump(cache, handle, indent=2)
+    if static_cache:
+        global_cache = cache
+    return result
+
+
+def if_geo(summary):
+    """IF-GEO: infer five queries from this source, fuse edits, then rewrite.
+
+    No benchmark query, competing source or search-engine feedback is used.
+    Full success takes 10 model calls. As upstream, failed/empty intermediate
+    stages return the original source with a diagnostic (not a new rewrite).
+    """
+    import re
+
+    QUERY_SYSTEM_PROMPT = """
+You are a search log analyst. You study how real users search on the web.
+Your task is to infer what queries users are most likely to type when they are trying to find or understand the content of a given webpage.
+
+# Task Description
+Based on the webpage content provided by the user, infer *realistic search queries* that would naturally lead them to this page.
+
+# Your Goals
+1. Generate **{num_queries} queries** that reflect **different aspects of the main theme**.
+2. Focus on the central topic, **not specific details** (trivial facts).
+3. Ensure queries are **natural**, **diverse**, and **not simple paraphrases**.
+4. For each query, estimate a **probability score (0–100)** reflecting real-world likelihood.
+
+# Output Format
+You must return ONLY a valid JSON object. Do not include markdown formatting (like ```json) or any other text.
+The format must be exactly:
+{{
+  "queries": [
+    {{
+      "query": "the inferred user query string",
+      "probability": 85
+    }},
+    ...
+  ]
+}}
+"""
+
+    QUERY_USER_PROMPT = """
+Web Content:
+"{content}"
+"""
+
+    SUGGESTION_SYSTEM_PROMPT = """
+You are an assistant who reviews how well a given webpage can answer a specific user query.
+Your goal is to identify concrete weaknesses in the webpage and propose clear, actionable revision suggestions.
+
+# Task Description
+You will receive a **user query** and a **webpage text**.
+
+Your task:
+1. Evaluate how well the webpage text could answer the query.
+2. Identify **specific weaknesses** in the text that may prevent a strong answer.
+3. Produce **up to {suggestions_num} revision suggestions** that would improve the webpage's ability to answer the query.
+
+# Requirements for Each Suggestion
+- **Target Specificity**: Refer to a **specific part, sentence, or paragraph** of the webpage.
+- **Excerpt**: Include a **short excerpt** (quoted or partially quoted) from that part to make the target explicit.
+- **Actionable**: Describe **how to modify** that part (e.g., add missing details, clarify wording, restructure, simplify). Be concrete, not abstract.
+- **Necessity Score**: Include a **necessity score (0–100)**, representing how important this suggestion is for answering the query.
+
+# Output Format (JSON Only)
+Return ONLY a valid JSON object. Do not include markdown formatting.
+The format must be exactly:
+{{
+  "suggestions": [
+    {{
+      "excerpt": "short excerpt from the relevant part of the text",
+      "suggestion": "the recommended revision details",
+      "necessity": 85
+    }},
+    ...
+  ]
+}}
+"""
+
+    SUGGESTION_USER_PROMPT = """
+User Query:
+"{query}"
+
+Webpage Text:
+"{web_content}"
+"""
+
+    DEDUP_SYSTEM_PROMPT = """
+You are a Senior Editor consolidating feedback from multiple readers.
+
+# Task
+You are provided with a list of revision suggestions grouped by user queries.
+Your goal is to **flatten** this list and **merge** duplicate suggestions that target the same content or issue.
+
+# Rules
+1. **De-duplicate:** Merge suggestions ONLY if they target the **same semantic topic** AND apply to the **same approximate location (excerpt)** in the text.
+   - _Constraint:_ Do NOT merge suggestions that target widely separated paragraphs (e.g., "Intro" vs "Conclusion"), even if they are thematically related. Keep them as separate items with the same topic tag.
+2. **Filter:** Discard suggestions with `necessity` < 60 unless they address a critical factual error.
+3. **Standardize:** Output a flat list. Assign a short `topic` tag to each.
+
+# Output Format (JSON Only)
+Return ONLY a valid JSON list. Do not include markdown formatting.
+Example:
+[
+  {{
+    "id": "suggest_1",
+    "topic": "eg.Comparison Table",
+    "excerpt": "short excerpt from the relevant part of the text",
+    "suggestion": "modify-suggestion content",
+    "necessity": 95
+  }},
+  ...
+]
+"""
+
+    DEDUP_USER_PROMPT_TEMPLATE = """
+Here is the input list of suggestions (JSON format):
+
+--BEGIN DATA--
+{json_input}
+--END DATA--
+"""
+
+    DISAMBIGUATE_SYSTEM_PROMPT = """
+You are a Logic Arbiter resolving content revision conflicts.
+
+# Task
+Review the consolidated suggestions. Detect and resolve any logical contradictions.
+
+# Rules
+1. **Detect Conflicts:** Look for instructions targeting the same `excerpt` or topic that are mutually exclusive (e.g., "Delete section" vs "Expand section").
+2. **Resolve:**
+   - If conflict exists, prioritize the instruction with higher `necessity`.
+   - If instructions are compatible (e.g., "Shorten text" AND "Add link"), combine them into one instruction.
+3. **Output:** A final, clean list of instructions.
+
+# Output Format (JSON Only)
+Return ONLY a valid JSON list. Do not include markdown formatting.
+Example:
+[
+  {{
+    "id": "suggest_1",
+    "excerpt": "original excerpt (for tracking location)",
+    "suggestion": "The final, non-conflicting instruction text..."
+  }},
+  ...
+]
+"""
+
+    DISAMBIGUATE_USER_PROMPT_TEMPLATE = """
+Here are the consolidated suggestions to review for conflicts (JSON format):
+
+--BEGIN DATA--
+{json_input}
+--END DATA--
+"""
+
+    LAYOUT_SYSTEM_PROMPT = """
+You are a Content Architect & Strategist.
+
+# Task
+You are given a webpage and a set of logic-checked revision instructions.
+Your goal is to create a **Master Revision Plan** that maps these instructions to the webpage structure.
+
+# Process
+1. **Analyze Structure:** Read the webpage to understand its current flow (Intro -> Body -> Conclusion).
+2. **Map & Group:** Assign each instruction to a specific logical section of the webpage.
+   - If multiple instructions target the same section (e.g., "Add history" and "Fix grammar" both in Intro), GROUP them into one plan item.
+   - If an instruction requires a new section, decide the best insertion point to maintain flow.
+3. **Plan:** Output a structured blueprint.
+
+# Output Format (JSON Only)
+Return ONLY a valid JSON object. Do not include markdown formatting.
+Example:
+{{
+  "revision_blueprint": [
+    {{
+      "section_name": "Introduction",
+      "target_location": "The first two paragraphs ending with '...'",
+      "modification_intent": "Expand context and fix tone.",
+      "directives": [
+        "Integrate instruction #1: Add historical background.",
+        "Integrate instruction #5: Change tone to professional."
+      ],
+      "format_note": "Keep as text paragraphs."
+    }},
+    ...
+  ]
+}}
+"""
+
+    LAYOUT_USER_PROMPT_TEMPLATE = """
+[Webpage Content]:
+--START CONTENT--
+{web_content}
+--END CONTENT--
+
+[Revision Instructions] (JSON format):
+--START INSTRUCTIONS--
+{json_input}
+--END INSTRUCTIONS--
+"""
+
+    EXECUTE_SYSTEM_PROMPT = """
+You are an expert Content Engineer and GEO (Generative Engine Optimization) Specialist.
+
+# Task
+Your task is to rewrite a given webpage content by strictly following a provided "Revision Blueprint".
+
+# Rules
+1. **Full Output:** You must output the **ENTIRE** rewritten webpage. Do not summarize, do not omit sections, and do not use placeholders like "[...rest of text remains same...]".
+2. **Strict Execution:** Implement every directive in the Blueprint (e.g., inserting tables, adding links, rewriting paragraphs, adding new sections).
+3. **Preservation:** For sections NOT mentioned in the Blueprint, preserve the original text and structure exactly as is.
+4. **Formatting:** Use standard Markdown. If the Blueprint asks for a table, render a valid Markdown table.
+5. **Tone:** If the Blueprint specifies a tone change (e.g., "professional"), apply it effectively to the target section.
+
+# Output
+Return only the final rewritten content in Markdown format.
+"""
+
+    EXECUTE_USER_PROMPT_TEMPLATE = """
+[Original Webpage Content]:
+--START CONTENT--
+{web_content}
+--END CONTENT--
+
+[Revision Blueprint]:
+--START BLUEPRINT--
+{blueprint_json}
+--END BLUEPRINT--
+
+Please generate the final optimized webpage content now.
+"""
+
+    def call_stage(system_prompt, user_prompt):
+        try:
+            return _supplementary_geo_call(user_prompt, system_prompt)
+        except Exception as exc:
+            print(f"[-] [IF-GEO] LLM call failed: {exc}")
+            return ""
+
+    def parse_stage(system_prompt, user_prompt, expected_type, stage, key=None):
+        raw = call_stage(system_prompt, user_prompt)
+        try:
+            cleaned = re.sub(r"```json\s*", "", raw)
+            cleaned = re.sub(r"```\s*$", "", cleaned).strip()
+            result = json.loads(cleaned)
+            if key is not None:
+                result = result[key]
+            if not isinstance(result, expected_type):
+                raise ValueError(f"Expected {expected_type.__name__}")
+            return result
+        except (ValueError, TypeError, KeyError) as exc:
+            print(f"[-] [IF-GEO {stage}] Invalid output: {exc}")
+            return expected_type()
+
+    def unchanged(stage):
+        print(f"[!] [IF-GEO {stage}] No usable output; returning original source.")
+        return summary
+
+    queries = parse_stage(
+        QUERY_SYSTEM_PROMPT.format(num_queries=5),
+        QUERY_USER_PROMPT.format(content=summary),
+        list, 'query generation', key='queries',
+    )
+    if not queries:
+        return unchanged('query generation')
+
+    suggestions = []
+    for item in queries:
+        # Each query comes exclusively from the document-derived query list.
+        query = item['query']
+        suggestions.extend(parse_stage(
+            SUGGESTION_SYSTEM_PROMPT.format(suggestions_num=5),
+            SUGGESTION_USER_PROMPT.format(query=query, web_content=summary),
+            list, 'suggestion generation', key='suggestions',
+        ))
+    if not suggestions:
+        return unchanged('suggestion generation')
+
+    deduplicated = parse_stage(
+        DEDUP_SYSTEM_PROMPT,
+        DEDUP_USER_PROMPT_TEMPLATE.format(
+            json_input=json.dumps(suggestions, indent=2, ensure_ascii=False)),
+        list, 'deduplication',
+    )
+    if not deduplicated:
+        return unchanged('deduplication')
+
+    resolved = parse_stage(
+        DISAMBIGUATE_SYSTEM_PROMPT,
+        DISAMBIGUATE_USER_PROMPT_TEMPLATE.format(
+            json_input=json.dumps(deduplicated, indent=2, ensure_ascii=False)),
+        list, 'conflict resolution',
+    )
+    if not resolved:
+        return unchanged('conflict resolution')
+
+    blueprint = parse_stage(
+        LAYOUT_SYSTEM_PROMPT,
+        LAYOUT_USER_PROMPT_TEMPLATE.format(
+            web_content=summary[:20000],
+            json_input=json.dumps(resolved, indent=2, ensure_ascii=False)),
+        dict, 'revision blueprint',
+    )
+    if 'revision_blueprint' not in blueprint:
+        return unchanged('revision blueprint')
+
+    rewritten = call_stage(
+        EXECUTE_SYSTEM_PROMPT,
+        EXECUTE_USER_PROMPT_TEMPLATE.format(
+            web_content=summary,
+            blueprint_json=json.dumps(blueprint, indent=2, ensure_ascii=False)),
+    )
+    return rewritten if rewritten else unchanged('revision execution')
+
+def _RAID_normalize_intent_headings(intent_analysis):
+    import re
+    label = '(Primary Intent|Refined Intent|Role[ \\t]+\\d+|WHO|WHAT|WHY|HOW|Source Evidence)'
+    decorated = '(?m)^[ \\t]*(?:#{1,6}[ \\t]+)?(?:\\*\\*|__)?' + label + '(?:\\*\\*|__)?[ \\t]*:(?:\\*\\*|__)?[ \\t]*'
+    text = re.sub(decorated, '\\1: ', intent_analysis)
+    return re.sub('(?m)^[ \\t]*(?:-{3,}|\\*{3,}|_{3,})[ \\t]*$', '', text)
+
+def _RAID_split_intent_analysis(intent_analysis):
+    import re
+    intent_analysis = _RAID_normalize_intent_headings(intent_analysis)
+    for label in ['Primary Intent', 'Refined Intent']:
+        matches = re.findall('^[ \\t]*' + label + '[ \\t]*:', intent_analysis, re.MULTILINE)
+        if len(matches) != 1:
+            raise ValueError(f'Expected exactly one {label} section')
+    primary = re.search('^[ \\t]*Primary Intent[ \\t]*:[ \\t]*(.*?)(?=^[ \\t]*Role[ \\t]+\\d+[ \\t]*:|^[ \\t]*Refined Intent[ \\t]*:)', intent_analysis, re.MULTILINE | re.DOTALL)
+    refined = re.search('^[ \\t]*Refined Intent[ \\t]*:[ \\t]*(.*?)\\Z', intent_analysis, re.MULTILINE | re.DOTALL)
+    if primary is None or refined is None:
+        raise ValueError('Cannot separate primary and refined intent')
+    primary_text, refined_text = (primary.group(1).strip(), refined.group(1).strip())
+    if not primary_text or not refined_text:
+        raise ValueError('Empty primary or refined intent')
+    analysis_marker = '(?im)^[ \\t]*(?:Role[ \\t]+\\d+|WHO|WHAT|WHY|HOW)[ \\t]*:|Source Evidence[ \\t]*:'
+    if any((re.search(analysis_marker, text) for text in [primary_text, refined_text])):
+        raise ValueError('Intent fields contain role analysis or source evidence')
+    return (primary_text, refined_text)
+
+def RAID(summary):
     summary_prompt = """You will be given a source of web content. 
 
 ### Your task
@@ -311,53 +706,104 @@ Original Source: {summary}
 
 ### Output Format
 Summary: [Your summary]
-""".format(summary = summary).strip()
-    summary_ = call_gpt(user_prompt = summary_prompt)
-    intent_prompt = """You will be given a source of web content and its summary. 
+""".format(summary=summary).strip()
+    source_summary = call_gpt(user_prompt=summary_prompt)
+    intent_prompt = """You will be given a source of web content and its summary.
 
 ### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Reflect the intent from multiple role perspectives:
-- Think about 1-3 roles that are most likely associated with the intent.
-- Consider the core needs for each role, given their/its occupational backgrounds and knowledge.
-- Briefly analyze any potential mismatches between the primary intent and these role-specific needs.
-- Based on above insights, summarize a refined intent covering the core needs of all roles. If the original intent is already precise and sufficient, keep it unchanged. 
-The output should only include the generalized intent without any additional explanations or analysis.
+1. Analyze the source and its summary to identify the primary search intent: what a reader would want to learn from this content.
+2. Reflect on this intent from 1-3 likely reader roles:
+- WHO: Identify the reader role.
+- WHAT: State the information this role would seek from the content.
+- WHY: Identify what the primary intent leaves implicit for this role, or state that it is already sufficient.
+- HOW: Refine the intent to make that information need explicit.
+3. Integrate the primary need and useful distinctions into a coherent refined intent of 1-3 sentences. Describe what readers want to understand, compare, or decide from the existing content, rather than a list of content additions or rewriting instructions. Keep relevant subjects and relationships clear, and limit the needs to information actually provided by the source. If refinement adds nothing useful, retain the primary intent.
+Output only the structured result below, within 300 words.
 
 ### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
+Original Source: {source}
+Source Summary: {summary}
 
-### Output Format (ONLY source)
-Generalized Intent: [Your generalized intent]
-
-""".format(summary = summary, summary_ = summary_).strip()
-    generalized_intent = call_gpt(user_prompt = intent_prompt)
-    print(generalized_intent)
-    user_prompt = """You will be given a source of web content, its summary and the generalized search intent associated with it. 
+### Output Format
+Primary Intent: [The main information need]
+Role 1:
+WHO: [Reader role]
+WHAT: [Information need]
+WHY: [Implicit need or already sufficient]
+HOW: [Refined information need]
+[Repeat for Role 2 and Role 3 only when useful]
+Refined Intent: [A coherent account of the primary and complementary information needs, in 1-3 sentences]
+""".format(source=summary, summary=source_summary).strip()
+    intent_analysis = call_gpt(user_prompt=intent_prompt)
+    primary_intent, refined_intent = _RAID_split_intent_analysis(intent_analysis)
+    user_prompt = """You will be given a source of web content, its summary, its primary search intent, and its refined information needs.
 
 ### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Based on the intents, determine the best optimization strategy from multiple angles to increase visibility and user engagement. Prioritize the primary intent, while using the generalized intent for minor adjustments.
-3. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
+1. Based on the primary intent and refined intent, determine the best optimization strategy from multiple angles to increase visibility and user engagement. For each supported need, identify the relevant information already in the original source and make it easier to locate, understand, and cite. Treat the refined needs as complementary coverage requirements, rather than minor adjustments or reasons to discard other key source information.
+2. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
 The output should only include the optimized source without any additional explanations or analysis.
 
 ### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
-Generalized Intent: {generalized_intent}
+Original Source: {source}
+Source Summary: {summary}
+Primary Intent: {primary_intent}
+Refined Intent:
+{refined_intent}
 
-### Output Format 
+### Output Format
 Optimized Source: [Your optimized source]
-""".format(summary = summary, summary_ = summary_, generalized_intent = generalized_intent).strip()
-    # optimized source
-    # optimized_source = call_gpt(user_prompt)
-    # sources = {'original source': summary, 'optimized source': optimized_source}
-    # print(sources)
-
+""".format(
+        source=summary, summary=source_summary, primary_intent=primary_intent, refined_intent=refined_intent).strip()
     return call_gpt(user_prompt)
 
-def intent_optimization_1_2reflection_234_3_rolestep(summary):
+def RAID_no_summary(summary):
+    intent_prompt = """You will be given a source of web content.
+
+### Your Task
+1. Analyze the source to identify the primary search intent: what a reader would want to learn from this content.
+2. Reflect on this intent from 1-3 likely reader roles:
+- WHO: Identify the reader role.
+- WHAT: State the information this role would seek from the content.
+- WHY: Identify what the primary intent leaves implicit for this role, or state that it is already sufficient.
+- HOW: Refine the intent to make that information need explicit.
+3. Integrate the primary need and useful distinctions into a coherent refined intent of 1-3 sentences. Describe what readers want to understand, compare, or decide from the existing content, rather than a list of content additions or rewriting instructions. Keep relevant subjects and relationships clear, and limit the needs to information actually provided by the source. If refinement adds nothing useful, retain the primary intent.
+Output only the structured result below, within 300 words.
+
+### Input Format
+Original Source: {source}
+
+### Output Format
+Primary Intent: [The main information need]
+Role 1:
+WHO: [Reader role]
+WHAT: [Information need]
+WHY: [Implicit need or already sufficient]
+HOW: [Refined information need]
+[Repeat for Role 2 and Role 3 only when useful]
+Refined Intent: [A coherent account of the primary and complementary information needs, in 1-3 sentences]
+""".format(source=summary).strip()
+    intent_analysis = call_gpt(user_prompt=intent_prompt)
+    primary_intent, refined_intent = _RAID_split_intent_analysis(intent_analysis)
+    user_prompt = """You will be given a source of web content, its primary search intent, and its refined information needs.
+
+### Your Task
+1. Based on the primary intent and refined intent, determine the best optimization strategy from multiple angles to increase visibility and user engagement. For each supported need, identify the relevant information already in the original source and make it easier to locate, understand, and cite. Treat the refined needs as complementary coverage requirements, rather than minor adjustments or reasons to discard other key source information.
+2. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
+The output should only include the optimized source without any additional explanations or analysis.
+
+### Input Format
+Original Source: {source}
+Primary Intent: {primary_intent}
+Refined Intent:
+{refined_intent}
+
+### Output Format
+Optimized Source: [Your optimized source]
+""".format(
+        source=summary, primary_intent=primary_intent, refined_intent=refined_intent).strip()
+    return call_gpt(user_prompt)
+
+def RAID_no_4W(summary):
     summary_prompt = """You will be given a source of web content. 
 
 ### Your task
@@ -369,160 +815,47 @@ Original Source: {summary}
 
 ### Output Format
 Summary: [Your summary]
-""".format(summary = summary).strip()
-    summary_ = call_gpt(user_prompt = summary_prompt)
-    ### check role
-    analyse_prompt_1 = """You will be given a source of web content and its summary. 
+""".format(summary=summary).strip()
+    source_summary = call_gpt(user_prompt=summary_prompt)
+    intent_prompt = """You will be given a source of web content and its summary.
 
 ### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Reflect the intent from multiple role perspectives:
-- Think about 1-3 roles that are most likely associated with the intent.
-- Consider the core needs for each role, given their/its occupational backgrounds and knowledge.
-- Briefly analyze any potential mismatches between the primary intent and these role-specific needs.
-- Based on above insights, summarize a refined intent covering the core needs of all roles. If the original intent is already precise and sufficient, keep it unchanged. 
-The output should only include the generalized intent without any additional explanations or analysis.
+1. Analyze the source and its summary to identify the primary search intent: what a reader would want to learn from this content.
+2. Examine the source's existing information to identify what the primary intent leaves implicit and make those information needs explicit. Do this directly, without reader roles or multi-role reflection.
+3. Integrate the primary need and useful distinctions into a coherent refined intent of 1-3 sentences. Describe what readers want to understand, compare, or decide from the existing content, rather than a list of content additions or rewriting instructions. Keep relevant subjects and relationships clear, and limit the needs to information actually provided by the source. If refinement adds nothing useful, retain the primary intent.
+Output only the structured result below, within 300 words.
 
 ### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
-
-### Output Format (ONLY source)
-Roles' Reflection: [Different Roles and their respective reflections]
-Generalized Intent: [Your generalized intent]
-
-""".format(summary = summary, summary_ = summary_).strip()
-    analyse_text_1 = call_gpt(user_prompt = analyse_prompt_1)
-    try:
-        reflections = analyse_text_1.split('Reflection:')[-1].split('Generalized Intent')[0]
-    except:
-        reflections = analyse_text_1.split('Reflection')[-1].split('Generalized Intent')[0]
-    roles_classification_prompt = """You will be given a set of different roles and their respective reflections. 
-
-### Your task
-Carefully analyze the content, extract all roles involved and each role's reflections.
-Each role should be described only in simplest format of a noun word or noun phrase, written in Title Case (each word starts with uppercase), with words connected by underscores if multiple words, as following:
-- Teacher, Student, Lawyer,...
-- Content_Editor, Seo_Specialist, Information_Architect,...
-- Human_Resources_Manager, Machine_Learning_Engineer, Radio_Talk_Host,...
-Present the result as role-reflection pairs in valid JSON format and ensure it contains no duplicate role-reflection pairs.
-The output should only include the result without any additional explanations or analysis.
-
-### Input Format
-Roles' Reflections: {reflections}
+Original Source: {source}
+Source Summary: {summary}
 
 ### Output Format
-[{{"Role1": "Reflection of Role1"}}, {{"Role2": "Reflection of Role2"}}, {{"Role3": "Reflection of Role3"}}, …]
-""".format(reflections = reflections).strip()
-    roles_classification = call_gpt(user_prompt = roles_classification_prompt)
-    with open('role_260106.jsonl', 'a') as f:
-        for role_pair in json.loads(roles_classification):
-            f.write(json.dumps(role_pair) + '\n')
-    intent_prompt = """You will be given a source of web content and its summary. 
+Primary Intent: [The main information need]
+Refined Intent: [A coherent account of the primary and complementary information needs, in 1-3 sentences]
+""".format(source=summary, summary=source_summary).strip()
+    intent_analysis = call_gpt(user_prompt=intent_prompt)
+    primary_intent, refined_intent = _RAID_split_intent_analysis(intent_analysis)
+    user_prompt = """You will be given a source of web content, its summary, its primary search intent, and its refined information needs.
 
 ### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Reflect the intent from multiple role perspectives:
-- Think about 1-3 roles that are most likely associated with the intent.
-- Consider the core needs for each role, given their/its occupational backgrounds and knowledge.
-- Briefly analyze any potential mismatches between the primary intent and these role-specific needs.
-- Based on above insights, summarize a refined intent covering the core needs of all roles. If the original intent is already precise and sufficient, keep it unchanged. 
-The output should only include the generalized intent without any additional explanations or analysis.
-
-### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
-
-### Output Format (ONLY source)
-Generalized Intent: [Your generalized intent]
-
-""".format(summary = summary, summary_ = summary_).strip()
-    generalized_intent = call_gpt(user_prompt = intent_prompt)
-    analyse_prompt_2 = """You will be given a source of web content, its summary and the generalized search intent associated with it. 
-
-### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Based on the intents, determine the best optimization strategy from multiple angles to increase visibility and user engagement. Prioritize the primary intent, while using the generalized intent for minor adjustments.
-3. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
+1. Based on the primary intent and refined intent, determine the best optimization strategy from multiple angles to increase visibility and user engagement. For each supported need, identify the relevant information already in the original source and make it easier to locate, understand, and cite. Treat the refined needs as complementary coverage requirements, rather than minor adjustments or reasons to discard other key source information.
+2. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
 The output should only include the optimized source without any additional explanations or analysis.
 
 ### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
-Generalized Intent: {generalized_intent}
+Original Source: {source}
+Source Summary: {summary}
+Primary Intent: {primary_intent}
+Refined Intent:
+{refined_intent}
 
 ### Output Format
-Primary Intent: [Your primary intent]
-Optimization Steps: [Your optimization steps]
 Optimized Source: [Your optimized source]
-""".format(summary = summary, summary_ = summary_, generalized_intent = generalized_intent).strip()
-    analyse_text_2 = call_gpt(user_prompt = analyse_prompt_2)
-    try:
-        intent = analyse_text_2.split('Primary Intent:')[1].split('Optimization Steps:')[0].strip()
-    except:
-        intent = analyse_text_2.split('Primary Intent')[1].split('Optimization Steps')[0].strip()
-    try:
-        steps = analyse_text_2.split('Optimization Steps:')[1].split('Optimized Source:')[0].strip()
-    except:
-        steps = analyse_text_2.split('Optimization Steps')[1].split('Optimized Source')[0].strip()
-    intent_dict = {'pimary intent': intent, 'generalized intent': generalized_intent}
-    print(intent_dict)
-    with open('intents_260106.jsonl', 'a') as f:
-        f.write(json.dumps(intent_dict) + '\n')
-    steps_classification_prompt = """You will be given a set of optimization steps for a source of web content. 
-
-### Your task
-Carefully analyze the steps, extract all strategies involved, and classify their intended purposes.
-Each strategy should be described as a generic action in the format of a verb + noun, as following:
-- Add domain-specific terminology, credible citations, expert quotes, plausible data or statistics
-- Add, replace, or remove keywords, phrases
-- Adjust the tone, style, and sentence structure
-- Restructure headings and paragraphs
-Each purpose should be described as the quality aspect the step aims to improve in the format of a single noun, as following:
-- Relevance
-- Authority
-- Completeness
-- Uniqueness
-- Logic
-- Readability
-Use the categories above whenever possible.  If none of the existing categories are sufficient, extend with consistent new ones.
-Present the result as purpose-action pairs in JSON format. If a single strategy serves multiple purposes, describe it with multiple pairs.
-The output should only include the classification result without any additional explanations or analysis.
-
-### Input Format
-Optimization Steps: {steps}
-
-### Output Format
-[{{"Purpose1": "Action1"}}, {{"Purpose2": "Action2"}}, {{"Purpose1": "Action3"}}, …]
-""".format(steps = steps).strip()
-    steps_classification = call_gpt(user_prompt = steps_classification_prompt)
-    with open('steps_classification_260106.jsonl', 'a') as f:
-        for step_pair in json.loads(steps_classification):
-            f.write(json.dumps(step_pair) + '\n')
-    user_prompt = """You will be given a source of web content, its summary and the generalized search intent associated with it. 
-
-### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Based on the intents, determine the best optimization strategy from multiple angles to increase visibility and user engagement. Prioritize the primary intent, while using the generalized intent for minor adjustments.
-3. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
-The output should only include the optimized source without any additional explanations or analysis.
-
-### Input Format
-Original Source: {summary}
-Source Summary: {summary_}
-Generalized Intent: {generalized_intent}
-
-### Output Format 
-Optimized Source: [Your optimized source]
-""".format(summary = summary, summary_ = summary_, generalized_intent = generalized_intent).strip()
-    # optimized source
-    # optimized_source = call_gpt(user_prompt)
-    # sources = {'original source': summary, 'optimized source': optimized_source}
-    # print(sources)
-
+""".format(
+        source=summary, summary=source_summary, primary_intent=primary_intent, refined_intent=refined_intent).strip()
     return call_gpt(user_prompt)
 
-def intent_optimization_1_234(summary):
+def RAID_no_intent(summary):
     summary_prompt = """You will be given a source of web content. 
 
 ### Your task
@@ -539,10 +872,9 @@ Summary: [Your summary]
     user_prompt = """You will be given a source of web content and its summary. 
 
 ### Your Task
-1. Carefully analyze the summary and identify the primary search intent.
-2. Based on the intent, determine the best optimization strategy from multiple angles to increase visibility and user engagement.
-3. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
-4. The output should only include the optimized source without any additional explanations or analysis.
+1. Based on the summary, determine the best optimization strategy from multiple angles to increase visibility and user engagement. 
+2. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
+The output should only include the optimized source without any additional explanations or analysis.
 
 ### Input Format
 Original Source: {summary}
@@ -551,54 +883,66 @@ Source Summary: {summary_}
 ### Output Format 
 Optimized Source: [Your optimized source]
 """.format(summary = summary, summary_ = summary_).strip()
+
     return call_gpt(user_prompt)
 
-def intent_optimization_234(summary):
-    user_prompt = """You will be given a source of web content. 
+def RAID_no_step(summary):
+    summary_prompt = """You will be given a source of web content. 
 
-### Your Task
-1. Carefully analyze the source and identify the primary search intent.
-2. Based on the intent, determine the best optimization strategy from multiple angles to increase visibility and user engagement.
-3. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
-4. The output should only include the optimized source without any additional explanations or analysis.
+### Your task
+Summarize the source clearly and concisely by extracting the key information and main points, avoiding irrelevant details, to make it understandable for readers who have not seen the original.
+The output should only include the summary without any additional explanations or analysis.
 
 ### Input Format
 Original Source: {summary}
 
-### Output Format 
-Optimized Source: [Your optimized source]
-""".format(summary = summary).strip()
-    return call_gpt(user_prompt)
-
-def intent_optimization_34(summary):
-    user_prompt = """You will be given a source of web content. 
+### Output Format
+Summary: [Your summary]
+""".format(summary=summary).strip()
+    source_summary = call_gpt(user_prompt=summary_prompt)
+    intent_prompt = """You will be given a source of web content and its summary.
 
 ### Your Task
-1. Based on the source, determine the best optimization strategy from multiple angles to increase visibility and user engagement.
-2. Follow the above optimization steps to optimize the source, ensuring the core meaning and key information of the source remains unchanged.
-3. The output should only include the optimized source without any additional explanations or analysis.
+1. Analyze the source and its summary to identify the primary search intent: what a reader would want to learn from this content.
+2. Reflect on this intent from 1-3 likely reader roles:
+- WHO: Identify the reader role.
+- WHAT: State the information this role would seek from the content.
+- WHY: Identify what the primary intent leaves implicit for this role, or state that it is already sufficient.
+- HOW: Refine the intent to make that information need explicit.
+3. Integrate the primary need and useful distinctions into a coherent refined intent of 1-3 sentences. Describe what readers want to understand, compare, or decide from the existing content, rather than a list of content additions or rewriting instructions. Keep relevant subjects and relationships clear, and limit the needs to information actually provided by the source. If refinement adds nothing useful, retain the primary intent.
+Output only the structured result below, within 300 words.
 
 ### Input Format
-Original Source: {summary}
+Original Source: {source}
+Source Summary: {summary}
 
-### Output Format 
-Optimized Source: [Your optimized source]
-""".format(summary = summary).strip()
-    return call_gpt(user_prompt)
-
-
-def intent_optimization_4(summary):
-    user_prompt = """You will be given a source of web content. 
+### Output Format
+Primary Intent: [The main information need]
+Role 1:
+WHO: [Reader role]
+WHAT: [Information need]
+WHY: [Implicit need or already sufficient]
+HOW: [Refined information need]
+[Repeat for Role 2 and Role 3 only when useful]
+Refined Intent: [A coherent account of the primary and complementary information needs, in 1-3 sentences]
+""".format(source=summary, summary=source_summary).strip()
+    intent_analysis = call_gpt(user_prompt=intent_prompt)
+    primary_intent, refined_intent = _RAID_split_intent_analysis(intent_analysis)
+    user_prompt = """You will be given a source of web content, its summary, its primary search intent, and its refined information needs.
 
 ### Your Task
-Optimize the source, ensuring the core meaning and key information of the source remains unchanged.
+1. Based on the primary intent and refined intent, optimize the source from multiple angles to increase visibility and user engagement, ensuring the core meaning and key information of the source remains unchanged. For each supported need, identify the relevant information already in the original source and make it easier to locate, understand, and cite. Treat the refined needs as complementary coverage requirements, rather than minor adjustments or reasons to discard other key source information.
 The output should only include the optimized source without any additional explanations or analysis.
 
 ### Input Format
-Original Source: {summary}
+Original Source: {source}
+Source Summary: {summary}
+Primary Intent: {primary_intent}
+Refined Intent:
+{refined_intent}
 
-### Output Format 
+### Output Format
 Optimized Source: [Your optimized source]
-""".format(summary = summary).strip()
+""".format(
+        source=summary, summary=source_summary, primary_intent=primary_intent, refined_intent=refined_intent).strip()
     return call_gpt(user_prompt)
-
