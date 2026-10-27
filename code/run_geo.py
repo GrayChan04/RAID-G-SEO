@@ -11,13 +11,6 @@ from datasets import load_dataset, load_from_disk, Dataset, Sequence, Value
 from pdb import set_trace as bp
 import time
 
-# from openai import OpenAI
-# client = OpenAI(api_key = 'sk-7hyJmJEhn2MYBPlR16C6163b4a3546A8A021D1413c6416B3', base_url = 'https://api.yxflow.xyz/v1')
-# client = OpenAI(api_key = 'sk-LH2LJOrZh1kZx9A0PQAw89JZiqzJ9b6UypYkyIKNpWXPwQjL', base_url = 'https://dzqc.link/v1/')
-
-# from zhipuai import ZhipuAI
-# client = ZhipuAI(api_key="880f73cd7d98f9981b1b8a80dd1136c6.L4mk4JObnqYJ7USZ")
-
 def identity(summary):
 	return summary
 
@@ -47,36 +40,12 @@ GEO_METHODS = {
 	'citing_credible_mine': citing_credible_sources_mine,
 	'more_quotes_mine' : more_quotes_mine,
 	'stats_optimization_gpt' : stats_optimization_mine,
-	# 'intent_optimization_1234' : intent_optimization_1234,
-	'intent_optimization_1_234' : intent_optimization_1_234,
-	# 'intent_optimization_12_34' : intent_optimization_12_34,
-	# 'intent_optimization_123_4' : intent_optimization_123_4,
-	# 'intent_optimization_1_2_34' : intent_optimization_1_2_34,
-	# 'intent_optimization_12_3_4' : intent_optimization_12_3_4,
-	# 'intent_optimization_1_23_4' : intent_optimization_1_23_4,
-	# 'intent_optimization_1_2_3_4' : intent_optimization_1_2_3_4,
-	'intent_optimization_234' : intent_optimization_234,
-	# 'intent_optimization_2_34' : intent_optimization_2_34,
-	'intent_optimization_34' : intent_optimization_34,
-	# 'intent_optimization_3_4' : intent_optimization_3_4,
-	'intent_optimization_4' : intent_optimization_4,
-	# 'intent_optimization_1_2rq34': intent_optimization_1_2rq34,
-	# 'intent_optimization_1_2rq_34': intent_optimization_1_2rq_34,
-	# 'intent_optimization_1_2rq_234': intent_optimization_1_2rq_234,
-	# 'intent_optimization_1_2rq_234_3': intent_optimization_1_2rq_234_3,
-	# 'intent_optimization_1_2rq_234_rq': intent_optimization_1_2rq_234_rq,
-	# 'intent_optimization_1_2rq_234_3rq': intent_optimization_1_2rq_234_3rq,
-	# 'intent_optimization_1_2rq_234_new': intent_optimization_1_2rq_234_new,
-	# 'intent_optimization_1_2rq_234_3rqinsight': intent_optimization_1_2rq_234_3rqinsight,
-	# 'intent_optimization_1_2rq_234_3rqinsightnew': intent_optimization_1_2rq_234_3rqinsightnew,
-	# 'intent_optimization_1_2rq_234_3insight': intent_optimization_1_2rq_234_3insight,
-	# 'intent_optimization_1_2reflection_234': intent_optimization_1_2reflection_234,
-	# 'intent_optimization_1_2reflection34':intent_optimization_1_2reflection34,
-	'intent_optimization_1_2reflection_234_3': intent_optimization_1_2reflection_234_3,
-	# 'intent_optimization_2reflection_234_3': intent_optimization_2reflection_234_3,
-	# 'intent_optimization_1_34': intent_optimization_1_34,
-	# 'intent_optimization_1_2reflection_24_4': intent_optimization_1_2reflection_24_4,
-	# 'intent_optimization_1_2reflection_234_3_rolestep': intent_optimization_1_2reflection_234_3_rolestep
+	'if_geo': if_geo,
+	'RAID': RAID,
+	'RAID_no_summary': RAID_no_summary,
+	'RAID_no_4W': RAID_no_4W,
+	'RAID_no_intent': RAID_no_intent,
+	'RAID_no_step': RAID_no_step,
 }
 
 EXTRACTIVE = False
@@ -192,20 +161,18 @@ if __name__ == '__main__':
 	# modified_dataset = dataset.map(modify_dataset, batched = False, load_from_cache_file=False)
 	# modified_dataset = modified_dataset.cast_column('query', feature = Sequence(Value("string")))
 	# modified_dataset.save_to_disk("./datasets/dataset_queryAdding")
+	# dataset = load_from_disk("./datasets/dataset_queryAdding")
 	dataset = load_from_disk("./datasets/dataset_queryAdding")
 	# shuffle and split 100 for try
-	split = dataset.train_test_split(
-		test_size = 0.1,
-		shuffle = True,
-		seed = 42,
-	)
+	
 	dataset = split['test']
 	# print(len(dataset[0]['query'])) # exzamine
+	# print(len(dataset[0])) # exzamine
 
 	result_dic = {}
 	for i, k in enumerate(dataset):
-		if i == 76 or i == 92:
-			continue
+		# if i == 76 or i == 92:
+		# 	continue
 		# Insert Metric here 
 		idx = k['sugg_idx']
 		result_dic[i] = {'idx': idx}
@@ -236,5 +203,4 @@ if __name__ == '__main__':
 			average_dic_list.append({'impression_fn': impression_name, 'improvements': improvement_average_list})
 		query_impression['average'] = {'impression_list': average_dic_list}
 		result_dic[i]['impressions'] = query_impression
-	json.dump(result_dic, open('./result_GLM-4-9B-0414_100_allmethods_260317.json', 'w'), indent = 2)
-		
+	json.dump(result_dic, open('./result_GLM-4-9B-0414_100_allmethods.json', 'w'), indent = 2)
